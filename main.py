@@ -11,7 +11,7 @@ import threading
 import sys
 
 APP_DISPLAY_NAME = "NC Bat"
-APP_VERSION = "2.6"
+APP_VERSION = "2.7"
 APP_NAME = f"{APP_DISPLAY_NAME} v{APP_VERSION}"
 AUTO_SAVE_INTERVAL = 60_000
 
