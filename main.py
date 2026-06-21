@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 import webbrowser
 import json
 import os
@@ -11,12 +11,12 @@ import threading
 import sys
 
 APP_DISPLAY_NAME = "NC Bat"
-APP_VERSION = "2.6"
+APP_VERSION = "2.7"
 APP_NAME = f"{APP_DISPLAY_NAME} v{APP_VERSION}"
 AUTO_SAVE_INTERVAL = 60_000
 
 UPDATE_URL   = "https://nocodebat.weebly.com/download.html"
-SUPPORT_URL  = "https://nocodebat.weebly.com/support-the-project.html"
+SUPPORT_URL  = "https://nocodebat.weebly.com/support-me.html"
 FEEDBACK_URL = "https://nocodebat.weebly.com/give-feedback.html"
 VERSION_FILE_URL = "https://gist.githubusercontent.com/H77CMDx/e190881a5ea4cee1f5c1eb225dbec07f/raw/NC_Bat_version.txt"
 GIST_API_URL     = "https://api.github.com/gists/e190881a5ea4cee1f5c1eb225dbec07f"
@@ -143,6 +143,13 @@ def _apply_theme_globals(theme_key):
 
 _apply_theme_globals("dark")
 
+class CustomScrollbar(ttk.Scrollbar):
+    def __init__(self, master=None, **kw):
+        for k in ["bg", "troughcolor", "activebackground", "relief", "bd", "width"]:
+            kw.pop(k, None)
+        super().__init__(master, **kw)
+tk.Scrollbar = CustomScrollbar
+
 # ─── TextAreaVar – wraps tk.Text with a StringVar-compatible interface ────────
 class TextAreaVar:
     def __init__(self, widget):
@@ -184,13 +191,15 @@ class RoundedButton(tk.Canvas):
         s = self.style
         if s == "primary":
             self._bg_norm, self._bg_hov, self._fg = _ACCENT,     _ACCENT_HOVER, _ACCENT_FG
+        elif s == "export":
+            self._bg_norm, self._bg_hov, self._fg = "#5170FF", "#6B86FF", "#FFFFFF"
         elif s == "danger":
             self._bg_norm, self._bg_hov, self._fg = _DANGER,     _DANGER_HOVER, "#FFF"
         elif s == "secondary":
             self._bg_norm, self._bg_hov, self._fg = _BTN_SEC_BG, _BTN_SEC_HOV,  _BTN_SEC_FG
         else:  # ghost
             self._bg_norm, self._bg_hov, self._fg = _BTN_GHO_BG, _BTN_GHO_HOV,  _BTN_GHO_FG
-        self._font = ("Segoe UI", self.fs, "bold" if s in ("primary", "danger") else "normal")
+        self._font = ("Segoe UI", self.fs, "bold" if s in ("primary", "danger", "export") else "normal")
 
     def apply_theme(self, theme):
         self._draw()
@@ -1515,6 +1524,7 @@ class BatBuilderApp:
     def __init__(self, root):
         self.root         = root
         self.current_lang = self._load_lang()
+        self.settings     = self._load_settings()
         self.current_project_path = None
         self.has_unsaved_changes  = False
         self.items          = []
@@ -1531,6 +1541,11 @@ class BatBuilderApp:
         self.root.geometry("1200x780")
         self.root.minsize(920, 620)
 
+        self.style = ttk.Style(self.root)
+        if "clam" in self.style.theme_names():
+            self.style.theme_use("clam")
+        self._update_scrollbar_style()
+
         self._build_ui()
         self._bind_shortcuts()
         self.refresh_preview()
@@ -1539,8 +1554,13 @@ class BatBuilderApp:
         self._autosave_dir = os.path.join(os.path.expanduser("~"), ".ncbat", "autosave")
         os.makedirs(self._autosave_dir, exist_ok=True)
         self._schedule_autosave()
-        self._start_update_check()
+        if self.settings.get("check_updates_on_startup", True):
+            self._start_update_check()
         self.check_first_run()
+
+        if self.settings.get("start_in_fullscreen", False):
+            self._is_fullscreen = False # Set up toggle properly
+            self.toggle_fullscreen()
 
     # ── Translation helpers ──────────────────────────────────────────────────
     def t(self, k):  return TRANSLATIONS[self.current_lang].get(k, k)
@@ -1624,6 +1644,8 @@ class BatBuilderApp:
         # Redraw RoundedButton canvases (they cache colours internally)
         self._refresh_rounded_buttons(self.root)
 
+        self._update_scrollbar_style()
+
         # Refresh lists so alt-row tints update
         self._fill_action_lb(self._action_keys)
         sel = self.action_lb.lb.curselection()
@@ -1637,6 +1659,19 @@ class BatBuilderApp:
         self._rebind_theme_btn()
         self._build_project_name_widget()
         self._status(f"Switched to {'light' if self._theme_name == 'light' else 'dark'} mode")
+
+    def _update_scrollbar_style(self):
+        try:
+            self.style.configure("Vertical.TScrollbar", gripcount=0,
+                                 background=_SCROLLBAR, darkcolor=_ENTRY_BG, lightcolor=_ENTRY_BG,
+                                 troughcolor=_ENTRY_BG, bordercolor=_ENTRY_BG, arrowcolor=_TEXT_MUTED)
+            self.style.configure("Horizontal.TScrollbar", gripcount=0,
+                                 background=_SCROLLBAR, darkcolor=_ENTRY_BG, lightcolor=_ENTRY_BG,
+                                 troughcolor=_ENTRY_BG, bordercolor=_ENTRY_BG, arrowcolor=_TEXT_MUTED)
+            self.style.map("Vertical.TScrollbar", background=[('active', _ACCENT)])
+            self.style.map("Horizontal.TScrollbar", background=[('active', _ACCENT)])
+        except Exception:
+            pass
 
     def _recolor_widget_tree(self, widget, color_map):
         """Recursively re-color a widget and all its descendants."""
@@ -1847,6 +1882,17 @@ class BatBuilderApp:
         self._fs_btn.bind("<Button-1>", lambda _e: self.toggle_fullscreen())
         self._fs_btn.bind("<Enter>",  lambda _e: self._fs_btn.config(fg=_ACCENT))
         self._fs_btn.bind("<Leave>",  lambda _e: self._fs_btn.config(fg=_TEXT_MUTED))
+
+        self._settings_btn = tk.Label(
+            right_hdr, text="⚙  Settings",
+            font=("Segoe UI", 12), cursor="hand2",
+            padx=10, pady=4,
+            bg=_HEADER_BG, fg=_TEXT_MUTED)
+        self._settings_btn.pack(side="left", padx=(8, 0))
+        self._settings_btn.bind("<Button-1>", lambda _e: self.show_settings())
+        self._settings_btn.bind("<Enter>",  lambda _e: self._settings_btn.config(fg=_ACCENT))
+        self._settings_btn.bind("<Leave>",  lambda _e: self._settings_btn.config(fg=_TEXT_MUTED))
+
         self.root.bind("<F11>",    lambda _e: self.toggle_fullscreen())
         self.root.bind("<Escape>", lambda _e: self._on_escape())
         # Store ref so toggle_theme can update hover bindings after theme swap
@@ -2126,7 +2172,7 @@ class BatBuilderApp:
         self.preview.bind("<Configure>", lambda e: self._ln.redraw())
 
         self.btn_export = RoundedButton(self.rp, self.t("save_bat"), command=self.save_bat,
-                                         style="primary", height=48, font_size=14)
+                                         style="export", height=48, font_size=14)
         self.btn_export.grid(row=2, column=0, sticky="ew", padx=18, pady=12)
         self.btn_export.configure(bg=_BG)
         self.btn_export.apply_theme(None)
@@ -2191,6 +2237,7 @@ class BatBuilderApp:
                 (self.t("about"),              self.show_about),
                 (self.t("terms"),              self.show_terms),
                 None,
+                ("Settings",                   self.show_settings),
                 (self.t("open_config_folder"), self.open_config_folder),
                 None,
                 (self.t("twitter"),            self.open_twitter),
@@ -3017,6 +3064,37 @@ class BatBuilderApp:
         except Exception:
             pass
 
+    def _settings_path(self):
+        return os.path.join(os.path.expanduser("~"), ".ncbat", "settings.json")
+
+    def _default_settings(self):
+        return {
+            "autosave_recovery_prompt": True,
+            "check_updates_on_startup": True,
+            "start_in_fullscreen": False,
+            "update_ignored_until": 0
+        }
+
+    def _load_settings(self):
+        defaults = self._default_settings()
+        try:
+            p = self._settings_path()
+            if os.path.exists(p):
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    defaults.update(data)
+        except Exception:
+            pass
+        return defaults
+
+    def _save_settings(self):
+        try:
+            os.makedirs(os.path.dirname(self._settings_path()), exist_ok=True)
+            with open(self._settings_path(), "w", encoding="utf-8") as f:
+                json.dump(self.settings, f, indent=4)
+        except Exception:
+            pass
+
     def change_language(self, lang):
         self.current_lang = lang
         self._save_lang(lang)
@@ -3348,18 +3426,42 @@ class BatBuilderApp:
             return False
 
     def _show_update_popup(self, latest):
-        answer = messagebox.askyesno(
-            "Update Available",
-            f"A new version of {APP_DISPLAY_NAME} is available: v{latest}\n\n"
-            f"You are running v{APP_VERSION}.\n\n"
-            "Go to the download page now?"
-        )
-        if answer:
+        dlg = self._dialog("Update Available", 480, 240)
+        dlg.configure(bg=_PANEL_BG)
+        tk.Label(dlg, text="Update Available", font=("Segoe UI", 14, "bold"),
+                  bg=_PANEL_BG, fg=_TEXT).pack(pady=(16, 6), padx=18, anchor="w")
+        tk.Frame(dlg, height=1, bg=_SEP).pack(fill="x", padx=18, pady=4)
+        
+        tk.Label(dlg, text=f"A new version of {APP_DISPLAY_NAME} is available: v{latest}\nYou are running v{APP_VERSION}.",
+                  font=("Segoe UI", 12), bg=_PANEL_BG, fg=_TEXT_MUTED, justify="left").pack(padx=18, pady=4, anchor="w")
+        
+        br = tk.Frame(dlg, bg=_PANEL_BG)
+        br.pack(fill="x", padx=18, pady=16)
+
+        def do_update():
+            dlg.destroy()
             webbrowser.open(UPDATE_URL)
+
+        def ignore(days):
+            if days > 0:
+                self.settings["update_ignored_until"] = datetime.datetime.now().timestamp() + (days * 86400)
+            else:
+                self.settings["update_ignored_until"] = float('inf') # Skip entirely (till next version resets? Simplified: just huge number)
+            self._save_settings()
+            dlg.destroy()
+
+        self._btn(br, "Download", do_update, "primary", 100, 30).pack(side="left")
+        self._btn(br, "Ignore 1 Day", lambda: ignore(1), "ghost", 100, 30).pack(side="left", padx=4)
+        self._btn(br, "Ignore 1 Week", lambda: ignore(7), "ghost", 110, 30).pack(side="left", padx=4)
+        self._btn(br, "Skip", dlg.destroy, "ghost", 60, 30).pack(side="left", padx=4)
 
     def _start_update_check(self):
         def check():
             try:
+                # Check if ignored
+                if datetime.datetime.now().timestamp() < self.settings.get("update_ignored_until", 0):
+                    return
+
                 latest = self._fetch_latest_version()
                 if self._is_newer(latest, APP_VERSION):
                     self.root.after(0, lambda v=latest: self._show_update_popup(v))
@@ -3426,6 +3528,57 @@ class BatBuilderApp:
         txt.config(state="disabled")
         self._btn(dlg, self.t("close"), dlg.destroy, "ghost", 90, 30).pack(pady=10)
 
+    def show_settings(self):
+        dlg = self._dialog("Settings", 420, 360)
+        dlg.configure(bg=_PANEL_BG)
+        tk.Label(dlg, text="Settings", font=("Segoe UI", 14, "bold"),
+                  bg=_PANEL_BG, fg=_TEXT).pack(pady=(16, 6), padx=18, anchor="w")
+        tk.Frame(dlg, height=1, bg=_SEP).pack(fill="x", padx=18, pady=4)
+
+        ff = tk.Frame(dlg, bg=_PANEL_BG)
+        ff.pack(fill="both", expand=True, padx=18, pady=4)
+        
+        autosave_var = tk.BooleanVar(value=self.settings.get("autosave_recovery_prompt", True))
+        updates_var = tk.BooleanVar(value=self.settings.get("check_updates_on_startup", True))
+        fullscreen_var = tk.BooleanVar(value=self.settings.get("start_in_fullscreen", False))
+
+        def make_cb(text, var):
+            cb = tk.Checkbutton(ff, text=text, variable=var, font=("Segoe UI", 12),
+                                bg=_PANEL_BG, fg=_TEXT, selectcolor=_ENTRY_BG,
+                                activebackground=_PANEL_BG, activeforeground=_TEXT)
+            cb.pack(anchor="w", pady=4)
+            return cb
+
+        make_cb("Show Autosave Recovery Prompt", autosave_var)
+        make_cb("Check for Updates on Startup", updates_var)
+        make_cb("Start in Fullscreen Mode", fullscreen_var)
+
+        tk.Frame(dlg, height=1, bg=_SEP).pack(fill="x", padx=18, pady=4)
+        
+        br = tk.Frame(dlg, bg=_PANEL_BG)
+        br.pack(fill="x", padx=18, pady=10)
+
+        def reset_defaults():
+            if messagebox.askyesno("Reset Settings", "Are you sure you want to reset settings to defaults?", parent=dlg):
+                self.settings = self._default_settings()
+                self._save_settings()
+                autosave_var.set(self.settings["autosave_recovery_prompt"])
+                updates_var.set(self.settings["check_updates_on_startup"])
+                fullscreen_var.set(self.settings["start_in_fullscreen"])
+                self._status("Settings reset to defaults")
+
+        def save_settings():
+            self.settings["autosave_recovery_prompt"] = autosave_var.get()
+            self.settings["check_updates_on_startup"] = updates_var.get()
+            self.settings["start_in_fullscreen"] = fullscreen_var.get()
+            self._save_settings()
+            self._status("Settings saved")
+            dlg.destroy()
+
+        self._btn(br, "Save", save_settings, "primary", 100, 30).pack(side="left")
+        self._btn(br, "Cancel", dlg.destroy, "ghost", 80, 30).pack(side="left", padx=8)
+        self._btn(br, "Reset", reset_defaults, "danger", 80, 30).pack(side="right")
+
     def show_help(self):  self._text_win(self.t("instruction_manual"), self.t("help_content"))
     def show_debug(self): self._text_win(self.t("debug"),              self.t("debug_content"))
     def show_about(self): self._text_win(self.t("about"),              self.t("about_content"))
@@ -3443,6 +3596,8 @@ class BatBuilderApp:
 
     def _offer_autosave_recovery(self):
         """If a recent autosave exists and the project is empty, offer to restore it."""
+        if not self.settings.get("autosave_recovery_prompt", True):
+            return
         if self.items:
             return
         try:
@@ -3749,6 +3904,7 @@ class BatBuilderApp:
 
 if __name__ == "__main__":
     root = tk.Tk()
+    root.withdraw()
     root.resizable(True, True)
     try:
         root.tk.call('tk', 'scaling', 1.0)
@@ -3781,4 +3937,6 @@ if __name__ == "__main__":
         pass
 
     app = BatBuilderApp(root)
+    root.update_idletasks()
+    root.deiconify()
     root.mainloop()
