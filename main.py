@@ -143,7 +143,6 @@ def _apply_theme_globals(theme_key):
 
 _apply_theme_globals("dark")
 
-
 # ─── TextAreaVar – wraps tk.Text with a StringVar-compatible interface ────────
 class TextAreaVar:
     def __init__(self, widget):
