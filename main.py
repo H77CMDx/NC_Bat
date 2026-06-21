@@ -11,7 +11,7 @@ import threading
 import sys
 
 APP_DISPLAY_NAME = "NC Bat"
-APP_VERSION = "2.7"
+APP_VERSION = "2.6"
 APP_NAME = f"{APP_DISPLAY_NAME} v{APP_VERSION}"
 AUTO_SAVE_INTERVAL = 60_000
 
@@ -1562,6 +1562,8 @@ class BatBuilderApp:
             self._is_fullscreen = False # Set up toggle properly
             self.toggle_fullscreen()
 
+        self._apply_window_dark_mode()
+
     # ── Translation helpers ──────────────────────────────────────────────────
     def t(self, k):  return TRANSLATIONS[self.current_lang].get(k, k)
     def ta(self, k): return ACTION_NAMES[self.current_lang].get(k, k)
@@ -1659,6 +1661,19 @@ class BatBuilderApp:
         self._rebind_theme_btn()
         self._build_project_name_widget()
         self._status(f"Switched to {'light' if self._theme_name == 'light' else 'dark'} mode")
+        self._apply_window_dark_mode()
+
+    def _apply_window_dark_mode(self):
+        try:
+            import ctypes
+            self.root.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
+            use_dark = (self._theme_name == "dark")
+            value = ctypes.c_int(1 if use_dark else 0)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(value), ctypes.sizeof(value))
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(value), ctypes.sizeof(value))
+        except Exception:
+            pass
 
     def _update_scrollbar_style(self):
         try:
@@ -2185,9 +2200,9 @@ class BatBuilderApp:
         self.rp.bind("<Configure>", _resize_export)
 
         # STATUS BAR
-        tk.Frame(self.root, height=1, bg=_SEP, bd=0).grid(row=1, column=0, sticky="sew")
+        # tk.Frame(self.root, height=1, bg=_SEP, bd=0).grid(row=1, column=0, sticky="sew")
         self.stbar = tk.Frame(self.root, bg=_STATUS_BG, bd=0, highlightthickness=0)
-        self.stbar.grid(row=2, column=0, sticky="ew")
+        # self.stbar.grid(row=2, column=0, sticky="ew")
         self.lbl_st = tk.Label(self.stbar, text=f"  {APP_NAME} ready",
                                 font=("Segoe UI", 13), anchor="w",
                                 bg=_STATUS_BG, fg=_TEXT_MUTED)
@@ -3426,34 +3441,38 @@ class BatBuilderApp:
             return False
 
     def _show_update_popup(self, latest):
-        dlg = self._dialog("Update Available", 480, 240)
-        dlg.configure(bg=_PANEL_BG)
-        tk.Label(dlg, text="Update Available", font=("Segoe UI", 14, "bold"),
-                  bg=_PANEL_BG, fg=_TEXT).pack(pady=(16, 6), padx=18, anchor="w")
-        tk.Frame(dlg, height=1, bg=_SEP).pack(fill="x", padx=18, pady=4)
+        overlay = tk.Frame(self.root, bg=_BORDER)
+        overlay.place(relx=0.5, rely=0.5, anchor="center", width=480, height=240)
         
-        tk.Label(dlg, text=f"A new version of {APP_DISPLAY_NAME} is available: v{latest}\nYou are running v{APP_VERSION}.",
+        inner = tk.Frame(overlay, bg=_PANEL_BG)
+        inner.pack(fill="both", expand=True, padx=2, pady=2)
+        
+        tk.Label(inner, text="Update Available", font=("Segoe UI", 14, "bold"),
+                  bg=_PANEL_BG, fg=_TEXT).pack(pady=(16, 6), padx=18, anchor="w")
+        tk.Frame(inner, height=1, bg=_SEP).pack(fill="x", padx=18, pady=4)
+        
+        tk.Label(inner, text=f"A new version of {APP_DISPLAY_NAME} is available: v{latest}\nYou are running v{APP_VERSION}.",
                   font=("Segoe UI", 12), bg=_PANEL_BG, fg=_TEXT_MUTED, justify="left").pack(padx=18, pady=4, anchor="w")
         
-        br = tk.Frame(dlg, bg=_PANEL_BG)
+        br = tk.Frame(inner, bg=_PANEL_BG)
         br.pack(fill="x", padx=18, pady=16)
 
         def do_update():
-            dlg.destroy()
+            overlay.destroy()
             webbrowser.open(UPDATE_URL)
 
         def ignore(days):
             if days > 0:
                 self.settings["update_ignored_until"] = datetime.datetime.now().timestamp() + (days * 86400)
             else:
-                self.settings["update_ignored_until"] = float('inf') # Skip entirely (till next version resets? Simplified: just huge number)
+                self.settings["update_ignored_until"] = float('inf')
             self._save_settings()
-            dlg.destroy()
+            overlay.destroy()
 
         self._btn(br, "Download", do_update, "primary", 100, 30).pack(side="left")
         self._btn(br, "Ignore 1 Day", lambda: ignore(1), "ghost", 100, 30).pack(side="left", padx=4)
         self._btn(br, "Ignore 1 Week", lambda: ignore(7), "ghost", 110, 30).pack(side="left", padx=4)
-        self._btn(br, "Skip", dlg.destroy, "ghost", 60, 30).pack(side="left", padx=4)
+        self._btn(br, "Skip", overlay.destroy, "ghost", 60, 30).pack(side="left", padx=4)
 
     def _start_update_check(self):
         def check():
