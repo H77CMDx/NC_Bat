@@ -54,7 +54,7 @@ if errorlevel 1 (
 echo.
 echo [NC Bat] Building NC Bat standalone executable...
 echo [NC Bat] Commands: !PYTHON_EXE! -m PyInstaller ...
-!PYTHON_EXE! -m PyInstaller --noconfirm --onefile --windowed --icon=".venv\Assets\icon.ico" --add-data ".venv\Assets;Assets" --name "NC Bat" ".venv\main.py"
+!PYTHON_EXE! -m PyInstaller --noconfirm --onefile --windowed --icon=".venv\Assets\icon.ico" --add-data ".venv\Assets;Assets" --name "NC Bat" "main.py"
 
 if errorlevel 0 (
     echo.
