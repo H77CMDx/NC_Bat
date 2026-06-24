@@ -9,7 +9,7 @@ NC Bat is a sleek, visual, modern batch file creator built with Python and Tkint
 - **Modern UI/UX**: Custom dark and light monochrome themes with smooth micro-animations.
 - **Visual Workflow Builder**: Add, edit, duplicate, remove, and reorder steps in your script.
 - **Drag & Drop / Groups**: Group related steps together and drag-and-drop to quickly structure scripts.
-- **Robust Editor Control**: Fully featured Undo (`Ctrl+Z`) and Redo (`Ctrl+Y`) system.
+- **Robust Editor Control**: Fully featured Undo (`Ctrl+Z`) and Redo (`Ctrl+Y`) system. 
 - **Autosave & Recovery**: Automatically saves progress every 60 seconds, with recovery prompt on startup in case of an unexpected crash.
 - **Smart Templates**: Save your frequent workflows as templates and manage them within the app.
 - **BAT Import & Export**:

@@ -15,8 +15,8 @@ APP_VERSION = "2.7"
 APP_NAME = f"{APP_DISPLAY_NAME} v{APP_VERSION}"
 AUTO_SAVE_INTERVAL = 60_000
 
-UPDATE_URL   = "https://nocodebat.weebly.com/download.html"
-SUPPORT_URL  = "https://nocodebat.weebly.com/support-me.html"
+UPDATE_URL   = "https://ncbat.netlify.app/download"
+SUPPORT_URL  = "https://ncbat.netlify.app/support%20us.html"
 FEEDBACK_URL = "https://nocodebat.weebly.com/give-feedback.html"
 VERSION_FILE_URL = "https://gist.githubusercontent.com/H77CMDx/e190881a5ea4cee1f5c1eb225dbec07f/raw/NC_Bat_version.txt"
 GIST_API_URL     = "https://api.github.com/gists/e190881a5ea4cee1f5c1eb225dbec07f"
@@ -24,7 +24,7 @@ GIST_API_URL     = "https://api.github.com/gists/e190881a5ea4cee1f5c1eb225dbec07
 # ─── Monochrome modern theme ─────────────────────────────────────────────────
 THEMES = {
     "dark": {
-        "bg":                "#0A0A0A",
+        "bg":                "#000000",
         "sidebar_bg":        "#111111",
         "panel_bg":          "#111111",
         "border":            "#222222",
@@ -1558,6 +1558,9 @@ class BatBuilderApp:
             self._start_update_check()
         self.check_first_run()
 
+        if self.settings.get("start_maximized", True):
+            self.root.wm_state("zoomed")
+
         if self.settings.get("start_in_fullscreen", False):
             self._is_fullscreen = False # Set up toggle properly
             self.toggle_fullscreen()
@@ -1937,9 +1940,13 @@ class BatBuilderApp:
 
         tk.Frame(main, width=1, bg=_BORDER, bd=0).grid(row=0, column=0, sticky="nse")
 
-        # Sidebar header with step count badge
-        sb_top = tk.Frame(self.sb, bg=_PANEL_BG, bd=0, highlightthickness=0)
-        sb_top.grid(row=0, column=0, sticky="ew", padx=14, pady=(10, 2))
+        # Sidebar header: title row + hint label stacked in one frame
+        sb_hdr = tk.Frame(self.sb, bg=_PANEL_BG, bd=0, highlightthickness=0)
+        sb_hdr.grid(row=0, column=0, sticky="ew")
+        sb_hdr.columnconfigure(0, weight=1)
+
+        sb_top = tk.Frame(sb_hdr, bg=_PANEL_BG, bd=0, highlightthickness=0)
+        sb_top.pack(fill="x", padx=14, pady=(10, 0))
         self.lbl_steps_hdr = tk.Label(sb_top, text=self.t("steps").upper(),
                                        font=("Segoe UI", 13, "bold"),
                                        bg=_PANEL_BG, fg=_TEXT_MUTED)
@@ -1948,6 +1955,13 @@ class BatBuilderApp:
                                         font=("Segoe UI", 12),
                                         bg=_PANEL_BG, fg=_TEXT_LIGHT)
         self.lbl_step_count.pack(side="left", padx=(6, 0))
+
+        # Hint label: drag to reorder / double-click to edit
+        self._lbl_steps_hint = tk.Label(sb_hdr,
+            text="⠿ drag to reorder   ⏎ double-click to edit",
+            font=("Segoe UI", 9), bg=_PANEL_BG, fg=_TEXT_LIGHT,
+            anchor="center")
+        self._lbl_steps_hint.pack(fill="x", padx=10, pady=(1, 3))
 
         self.steps_lb = ThemedListbox(self.sb)
         self.steps_lb.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 8))
@@ -3087,6 +3101,7 @@ class BatBuilderApp:
             "autosave_recovery_prompt": True,
             "check_updates_on_startup": True,
             "start_in_fullscreen": False,
+            "start_maximized": True,
             "update_ignored_until": 0
         }
 
@@ -3548,7 +3563,7 @@ class BatBuilderApp:
         self._btn(dlg, self.t("close"), dlg.destroy, "ghost", 90, 30).pack(pady=10)
 
     def show_settings(self):
-        dlg = self._dialog("Settings", 420, 360)
+        dlg = self._dialog("Settings", 420, 400)
         dlg.configure(bg=_PANEL_BG)
         tk.Label(dlg, text="Settings", font=("Segoe UI", 14, "bold"),
                   bg=_PANEL_BG, fg=_TEXT).pack(pady=(16, 6), padx=18, anchor="w")
@@ -3557,20 +3572,28 @@ class BatBuilderApp:
         ff = tk.Frame(dlg, bg=_PANEL_BG)
         ff.pack(fill="both", expand=True, padx=18, pady=4)
         
-        autosave_var = tk.BooleanVar(value=self.settings.get("autosave_recovery_prompt", True))
-        updates_var = tk.BooleanVar(value=self.settings.get("check_updates_on_startup", True))
-        fullscreen_var = tk.BooleanVar(value=self.settings.get("start_in_fullscreen", False))
+        autosave_var    = tk.BooleanVar(value=self.settings.get("autosave_recovery_prompt", True))
+        updates_var     = tk.BooleanVar(value=self.settings.get("check_updates_on_startup", True))
+        fullscreen_var  = tk.BooleanVar(value=self.settings.get("start_in_fullscreen", False))
+        maximized_var   = tk.BooleanVar(value=self.settings.get("start_maximized", True))
 
-        def make_cb(text, var):
-            cb = tk.Checkbutton(ff, text=text, variable=var, font=("Segoe UI", 12),
+        def make_cb(text, var, note=None):
+            row = tk.Frame(ff, bg=_PANEL_BG)
+            row.pack(fill="x", pady=2)
+            cb = tk.Checkbutton(row, text=text, variable=var, font=("Segoe UI", 12),
                                 bg=_PANEL_BG, fg=_TEXT, selectcolor=_ENTRY_BG,
                                 activebackground=_PANEL_BG, activeforeground=_TEXT)
-            cb.pack(anchor="w", pady=4)
+            cb.pack(anchor="w")
+            if note:
+                tk.Label(row, text=note, font=("Segoe UI", 10),
+                         bg=_PANEL_BG, fg=_TEXT_LIGHT, anchor="w", padx=22).pack(anchor="w")
             return cb
 
+        make_cb("Start Maximized on Launch", maximized_var,
+                note="Opens the window maximized each time you start NC Bat.")
+        make_cb("Start in Fullscreen Mode", fullscreen_var)
         make_cb("Show Autosave Recovery Prompt", autosave_var)
         make_cb("Check for Updates on Startup", updates_var)
-        make_cb("Start in Fullscreen Mode", fullscreen_var)
 
         tk.Frame(dlg, height=1, bg=_SEP).pack(fill="x", padx=18, pady=4)
         
@@ -3584,12 +3607,14 @@ class BatBuilderApp:
                 autosave_var.set(self.settings["autosave_recovery_prompt"])
                 updates_var.set(self.settings["check_updates_on_startup"])
                 fullscreen_var.set(self.settings["start_in_fullscreen"])
+                maximized_var.set(self.settings["start_maximized"])
                 self._status("Settings reset to defaults")
 
         def save_settings():
             self.settings["autosave_recovery_prompt"] = autosave_var.get()
             self.settings["check_updates_on_startup"] = updates_var.get()
             self.settings["start_in_fullscreen"] = fullscreen_var.get()
+            self.settings["start_maximized"] = maximized_var.get()
             self._save_settings()
             self._status("Settings saved")
             dlg.destroy()
