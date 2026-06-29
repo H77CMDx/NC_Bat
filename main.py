@@ -9,9 +9,10 @@ import copy
 import urllib.request
 import threading
 import sys
+from collections import deque
 
 APP_DISPLAY_NAME = "NC Bat"
-APP_VERSION = "2.7"
+APP_VERSION = "2.7.1"
 APP_NAME = f"{APP_DISPLAY_NAME} v{APP_VERSION}"
 AUTO_SAVE_INTERVAL = 60_000
 
@@ -1530,12 +1531,13 @@ class BatBuilderApp:
         self.items          = []
         self.next_action_id = 0
         self._cached_lines  = None
-        self._undo_stack    = []
-        self._redo_stack    = []
+        self._undo_stack    = deque(maxlen=60)  # O(1) popleft, bounded size
+        self._redo_stack    = deque(maxlen=60)
         self._drag_idx      = None
         self._status_job    = None
         self._theme_name    = "dark"
         self.project_name   = "Untitled"
+        self._search_job    = None
 
         self.root.title(self.t("app_title"))
         self.root.geometry("1200x780")
@@ -1707,9 +1709,10 @@ class BatBuilderApp:
                 if opt in cfg:
                     try:
                         val = widget.cget(opt)
-                        mapped = color_map.get(val.lower() if val else "")
-                        if mapped:
-                            updates[opt] = mapped
+                        if val:
+                            mapped = color_map.get(val.lower())
+                            if mapped:
+                                updates[opt] = mapped
                     except Exception:
                         pass
             if updates:
@@ -2429,8 +2432,6 @@ class BatBuilderApp:
     def _push_undo(self):
         state = (copy.deepcopy(self.items), self.next_action_id)
         self._undo_stack.append(state)
-        if len(self._undo_stack) > 60:
-            self._undo_stack.pop(0)
         self._redo_stack.clear()
 
     def undo(self):
@@ -2483,6 +2484,13 @@ class BatBuilderApp:
         self.lbl_action_tip.config(text=tip)
 
     def on_search_change(self, *_args):
+        # Debounce: cancel any pending search and reschedule 80 ms later
+        if hasattr(self, "_search_job") and self._search_job:
+            self.root.after_cancel(self._search_job)
+        self._search_job = self.root.after(80, self._do_search)
+
+    def _do_search(self):
+        self._search_job = None
         q = self.search_var.get().strip().lower()
         if not q or q == self.search_ent._ph.lower():
             self._fill_action_lb(_ALL_ACTION_KEYS)
@@ -2620,8 +2628,10 @@ class BatBuilderApp:
         lb.delete(0, "end")
         labels = []
         self._collect_labels(self.items, 0, labels)
-        for i, (lbl, is_grp) in enumerate(labels):
+        # Batch-insert all entries then colour alternating rows in a single pass
+        for lbl, _is_grp in labels:
             lb.insert("end", lbl)
+        for i, (_lbl, is_grp) in enumerate(labels):
             if not is_grp and i % 2 == 1:
                 lb.itemconfigure(i, background=_ALT_ROW_BG)
         # Update step count badge
@@ -2642,12 +2652,14 @@ class BatBuilderApp:
         self._sync_unsaved_dot()
 
     def _collect_labels(self, items, depth, out):
-        pad = "  " * depth
-        ta  = self.ta
+        pad          = "  " * depth
+        ta           = self.ta
+        step_summary = self._step_summary
+        action_icons = _ACTION_ICONS
         for it in items:
             if it[0] == "action":
-                icon    = _ACTION_ICONS.get(it[1], " ")
-                summary = self._step_summary(it[1], it[2])
+                icon    = action_icons.get(it[1], " ")
+                summary = step_summary(it[1], it[2])
                 label   = f"{pad}  {icon}  {ta(it[1])}"
                 if summary:
                     label = f"{label}:  {summary}"
@@ -2699,11 +2711,12 @@ class BatBuilderApp:
         raw = vals.get(field, "").strip()
         if not raw:
             return ""
+        # Fast first-line extraction without allocating a list
+        nl = raw.find("\n")
+        first_line = raw[:nl] if nl != -1 else raw
         # Truncate long values so the listbox stays readable
-        if len(raw) > 38:
-            raw = raw[:36] + "…"
-        # For URLs (one per line) show only the first one
-        first_line = raw.splitlines()[0]
+        if len(first_line) > 38:
+            first_line = first_line[:36] + "…"
         return first_line
 
     # ── Mapping (flat index → path) ──────────────────────────────────────────
@@ -3028,22 +3041,35 @@ class BatBuilderApp:
         pv.configure(state="normal")
         pv.delete("1.0", "end")
         pv.insert("1.0", "\n".join(lines))
-        self._apply_syntax_highlight()
+        self._apply_syntax_highlight(lines)
         pv.configure(state="disabled")
         self.root.after_idle(self._ln.redraw)
 
-    def _apply_syntax_highlight(self):
+    def _configure_syntax_tags(self):
+        """Configure syntax highlight tags once (called after preview widget is created)."""
         pv = self.preview
-        # Configure tags (idempotent)
-        pv.tag_configure("sh_header",   foreground=_TEXT_MUTED,   font=("Consolas", 13))
-        pv.tag_configure("sh_comment",  foreground=_TEXT_MUTED,   font=("Consolas", 13, "italic"))
-        pv.tag_configure("sh_keyword",  foreground=_ACCENT,       font=("Consolas", 13, "bold"))
-        pv.tag_configure("sh_danger",   foreground=_DANGER,       font=("Consolas", 13, "bold"))
-        pv.tag_configure("sh_string",   foreground=_BTN_SEC_FG,   font=("Consolas", 13))
-        pv.tag_configure("sh_variable", foreground=_TEXT_MUTED,   font=("Consolas", 13, "italic"))
+        pv.tag_configure("sh_header",   foreground=_TEXT_MUTED, font=("Consolas", 13))
+        pv.tag_configure("sh_comment",  foreground=_TEXT_MUTED, font=("Consolas", 13, "italic"))
+        pv.tag_configure("sh_keyword",  foreground=_ACCENT,     font=("Consolas", 13, "bold"))
+        pv.tag_configure("sh_danger",   foreground=_DANGER,     font=("Consolas", 13, "bold"))
+        pv.tag_configure("sh_string",   foreground=_BTN_SEC_FG, font=("Consolas", 13))
+        pv.tag_configure("sh_variable", foreground=_TEXT_MUTED, font=("Consolas", 13, "italic"))
 
-        content = pv.get("1.0", "end-1c")
-        for lineno, line in enumerate(content.split("\n"), 1):
+    def _apply_syntax_highlight(self, lines=None):
+        pv = self.preview
+        # Re-apply tag colours (colours may change on theme switch)
+        pv.tag_configure("sh_header",   foreground=_TEXT_MUTED, font=("Consolas", 13))
+        pv.tag_configure("sh_comment",  foreground=_TEXT_MUTED, font=("Consolas", 13, "italic"))
+        pv.tag_configure("sh_keyword",  foreground=_ACCENT,     font=("Consolas", 13, "bold"))
+        pv.tag_configure("sh_danger",   foreground=_DANGER,     font=("Consolas", 13, "bold"))
+        pv.tag_configure("sh_string",   foreground=_BTN_SEC_FG, font=("Consolas", 13))
+        pv.tag_configure("sh_variable", foreground=_TEXT_MUTED, font=("Consolas", 13, "italic"))
+
+        # Use cached lines to avoid an O(n) Text.get() call
+        if lines is None:
+            lines = self._cached_lines or []
+
+        for lineno, line in enumerate(lines, 1):
             ls = f"{lineno}.0"
             le = f"{lineno}.end"
             if _SH_HEADER.match(line):
@@ -3058,7 +3084,7 @@ class BatBuilderApp:
                 m = re.match(r"^(\s*@?\S+)", line)
                 if m:
                     pv.tag_add("sh_keyword", ls, f"{lineno}.{m.end()}")
-            # Quoted strings (applied after keyword so they can overlap)
+            # Quoted strings
             for sm in _SH_STRING.finditer(line):
                 pv.tag_add("sh_string", f"{lineno}.{sm.start()}", f"{lineno}.{sm.end()}")
             # %variables%

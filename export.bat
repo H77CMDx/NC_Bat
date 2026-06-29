@@ -104,10 +104,10 @@ echo.
 echo [NC Bat] Building NC Bat standalone executable...
 if exist "Assets\icon.ico" (
     echo [NC Bat] Commands: "!PYTHON_EXE!" -m PyInstaller with custom icon ...
-    "!PYTHON_EXE!" -m PyInstaller --noconfirm --onefile --windowed --icon="Assets\icon.ico" --add-data "Assets;Assets" --name "NC Bat" "main.py"
+    "!PYTHON_EXE!" -m PyInstaller --noconfirm --onedir --noconsole --icon="Assets\icon.ico" --add-data "Assets;Assets" --name "NC Bat" "main.py"
 ) else (
     echo [NC Bat] Commands: "!PYTHON_EXE!" -m PyInstaller without custom icon ...
-    "!PYTHON_EXE!" -m PyInstaller --noconfirm --onefile --windowed --add-data "Assets;Assets" --name "NC Bat" "main.py"
+    "!PYTHON_EXE!" -m PyInstaller --noconfirm --onedir --noconsole --add-data "Assets;Assets" --name "NC Bat" "main.py"
 )
 
 if %ERRORLEVEL% equ 0 (
